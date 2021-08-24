@@ -25,6 +25,7 @@ import java.net.URLEncoder;
 
 import java.nio.charset.StandardCharsets;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -36,10 +37,13 @@ public class ReplDBClient {
 	private String url;
 	private boolean encoded;
 	private boolean cached;
+	private static Map<String, String> cache = null;
 	private boolean debug;
 	private final HttpClient httpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
 
 	// Constructors
+
+	// TODO - Use boolean... bools with one constructor rather than making it redundant with a bunch
 
 	public ReplDBClient() {
 		this(System.getenv("REPLIT_DB_URL"), true, true, false);
@@ -74,264 +78,297 @@ public class ReplDBClient {
 		this.encoded = encoded;
 		this.cached = cached;
 		this.debug = debug;
-		
+
 		try {
 
 			URI uri = new URI(url);
 
 			if(!uri.getHost().equals("kv.replit.com")) {
-				throw new Exception("Invalid host for provided database URL");
+				throw new Exception("Invalid host \"" + uri.getHost() + "\"for provided database URL. Please provide one with the host \"kv.replit.com\"");
 			}
 
 			if(!uri.getScheme().equals("https")) {
-				throw new Exception("Provided URL is not https");
+				throw new Exception("Provided URL scheme is not https");
 			}
 
 		} catch(Exception e) {
-			if (e.getMessage() != null) System.out.println(e.getMessage());
+			if (e.getMessage() != null) System.out.println("[REPLDB] " + e.getMessage());
 			System.err.println("Invalid URL provided for ReplDBClient");
 			System.exit(1);
 		}
 
 		this.url = url;
-		
-	}
 
-	// Initialize
-
-	public void init() throws IOException, InterruptedException {
-		this.cache = this.getAllStart();
-		// this.print();
-	}
-
-	// Set Value(s)
-
-	public void set(String key, String value) throws IOException, InterruptedException {
-
-		Map<Object, Object> data = new HashMap<>();
-
-		if (encoded) {
-			key = encode(key);
-			value = encode(value);
+		if(this.cached && ReplDBClient.cache == null) {
+			ReplDBClient.cache = new HashMap<String, String>();
+			for(String s: this.list(false)) {
+				ReplDBClient.cache.put(s, this.get(s));
+			}
+			if(this.debug) {
+				System.out.println("[REPLDB] Initialized cache: " + ReplDBClient.cache);
+			}
 		}
-		
-		data.put(key, value);
-		cache.put(key, value);
 
-		HttpRequest request = HttpRequest.newBuilder()
-			.POST(ofFormData(data))
-			.uri(URI.create(this.url))
-			.setHeader("Content-Type", "application/x-www-form-urlencoded")
-			.build();
-
-		httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-	}
-
-	public void set(Map<String, String> pairs) throws IOException, InterruptedException {
-		for (Map.Entry<String, String> entry : pairs.entrySet()){
-			this.set(entry.getKey(), entry.getValue());
+		if(this.debug) {
+			System.out.println("[REPLDB] Initialized ReplDBClient with the following values\n\tencoded = " + this.encoded + "\n\turl = " + this.url + "\n\tcached = " + this.cached);
 		}
+
 	}
 
-	// Get Value(s)
+	// Get value by key
 
-	public String get(String key) {
-		
-		if (encoded) key = encode(key);
+	public String get(String keyRaw) {
+		return this.get(keyRaw, this.cached);
+	}
 
-		if(cache != null) {
-			return cache.get(key);
-		} else {
+	public String get(String key, boolean cached) {
 
-			HttpRequest request = HttpRequest.newBuilder()
-				.GET()
-				.uri(URI.create(this.url + "/" + key))
-				.build();
+		key = this.encoded ? encode(key) : key; // Encode key if encoded
 
-			try {
+		if(cached && ReplDBClient.cache.containsKey(key)) {
+			// Check if cached, if so, return the value at cache
+			String valueRaw = ReplDBClient.cache.get(key);
+			String value = this.encoded ? decode(valueRaw) : valueRaw;
+			if(this.debug) {
+				System.out.println("[REPLDB] Got \"" + value + "\" from \"" + key + "\" from cache");
+			}
+			return value;
+		}
 
-				HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+		HttpRequest request = HttpRequest.newBuilder().GET().uri(URI.create(this.url + "/" + key)).build(); // Create HTTP Request
 
-				if (encoded) {
-					return decode(response.body());
-				} else {
-					return response.body();
-				}
+		HttpResponse<String> response = null;
 
-			} catch(Exception e) {
-				System.out.println("Error getting value");
+		try {
+			response = httpClient.send(request, HttpResponse.BodyHandlers.ofString()); // Send HTTP request
+		} catch(Exception e) {
+			if(e.getMessage() != null && e.getMessage() != "") {
+				System.out.println("[REPLDB] " + e.getMessage());
+			}
+			e.printStackTrace();
+			System.err.println("[REPLDB] Failed to GET \"" + key + "\"");
+			return null;
+		}
+
+		if(response != null) {
+
+			if(this.debug) {
+				System.out.println("[REPLDB] Recieved response \"" + response.body() + "\" through GET HTTP Request");
 			}
 
+			// Return value
+			String value = this.encoded ? decode(response.body()) : response.body();
+			return value;
 		}
 
+		System.out.println("[REPLDB] Failed to get. Returning null");
 		return null;
-
 	}
 
 	public String[] get(String... keys) {
+		return this.get(this.cached, keys);
+	}
+
+	public String[] get(boolean cached, String... keys) {
 		String[] toRet = new String[keys.length];
 
 		for (int i = 0; i < toRet.length; i++) {
-			toRet[i] = get(keys[i]);
+			toRet[i] = this.get(keys[i], cached);
 		}
 
 		return toRet;
 	}
+
+	// Set key to value
+
+	public boolean set(String key, String value) {
+
+		if(this.encoded) {
+			key = this.encode(key);
+			value = this.encode(value);
+		}
+
+		HttpRequest request = HttpRequest.newBuilder().POST(getPostData(key, value)).uri(URI.create(this.url)).setHeader("Content-Type", "application/x-www-form-urlencoded").build();
+
+		try {
+			httpClient.send(request, HttpResponse.BodyHandlers.ofString()); // Send HTTP request
+		} catch(Exception e) {
+			if(e.getMessage() != null && e.getMessage() != "") {
+				System.out.println("[REPLDB] " + e.getMessage());
+			}
+			e.printStackTrace();
+			System.err.println("[REPLDB] Failed to SET \"" + key + "\" to \"" + value + "\"");
+			return false;
+		}
+
+		if(this.cached && !ReplDBClient.cache.containsKey(key)) {
+			ReplDBClient.cache.put(key, value);
+		}
+
+		if(this.debug) {
+			System.out.println("[REPLDB] Set \"" + key + "\" to \"" + value + "\"");
+		}
+
+		return true;	
+
+	}
+
+	public boolean[] set(String[] keys, String[] pairs) {
+		boolean[] toRet = new boolean[Math.min(keys.length, pairs.length)];
+		for(int i = 0; i < toRet.length; i++) {
+			toRet[i] = this.set(keys[i], pairs[i]);
+		}
+		return toRet;
+	}
+
+	public boolean[] set(Map<String, String> pairs) {
+		boolean[] toRet = new boolean[pairs.size()];
+		int nextIndex = 0;
+		for (Map.Entry<String, String> entry : pairs.entrySet()){
+			toRet[nextIndex] = this.set(entry.getKey(), entry.getValue());
+			nextIndex++;
+		}
+		return toRet;
+	}
+
+	// Delete key/value pair
+
+	public boolean delete(String key) {
+
+		key = this.encoded ? encode(key) : key;
+
+		HttpRequest request = HttpRequest.newBuilder().DELETE().uri(URI.create(this.url + "/" + key)).build();
+
+		try {
+			httpClient.send(request, HttpResponse.BodyHandlers.ofString()); // Send HTTP request
+		} catch(Exception e) {
+			if(e.getMessage() != null && e.getMessage() != "") {
+				System.out.println("[REPLDB] " + e.getMessage());
+			}
+			e.printStackTrace();
+			System.err.println("[REPLDB] Failed to DELETE \"" + key + "\"");
+			return false;
+		}
+
+		if(this.cached && ReplDBClient.cache.containsKey(key)) {
+			ReplDBClient.cache.remove(key);
+		}
+
+		if(this.debug) {
+			System.out.println("[REPLDB] Deleted \"" + key + "\"");
+		}
+
+		return true;
+
+	}
+
+	public boolean[] delete(String... keys) {
+		boolean[] bools = new boolean[keys.length];
+		for(int i = 0; i < keys.length; i++) {
+			bools[i] = this.delete(keys[i]);
+		}
+		return bools;
+	}
+
+	public boolean[] empty() {
+		return this.delete(this.list());
+	}
+
+	// List keys
 
 	public String[] list()  {
-
-		return cache.keySet().toArray(new String[cache.size()]);
-
+		return this.list("");
 	}
 
-	public String[] list(String pre) throws IOException, InterruptedException {
-
-		HttpRequest request = HttpRequest.newBuilder()
-			.GET()
-			.uri(URI.create(this.url + "?prefix=" + pre))
-			.build();
-
-		HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-		String[] tokens = new String[0];
-		if(encoded) {
-			tokens = decode(response.body()).split("\n");
-		} else {
-			tokens = response.body().split("\n");
-		}
-
-		return tokens;
-
+	public String[] list(String prefix) {
+		return this.list(prefix, this.cached);
 	}
 
-	public Map<String, String> getAll() {
-		return this.cache;
+	public String[] list(boolean cached) {
+		return this.list("", cached);
 	}
 
-	private Map<String, String> getAllStart() throws IOException, InterruptedException {
+	public String[] list(String prefix, boolean cached)  {
 
-		Map<String, String> toRet = new HashMap<String, String>();
+		prefix = this.encoded ? this.encode(prefix) : prefix;
+		if(prefix == null) prefix = "";
 
-		for (String k: this.list("")) {
-			if (encoded) {
-				toRet.put(
-					decode(k), 
-					this.get(k)
-				);
-			} else {
-				toRet.put(k, get(k));
+		if(cached && this.cache != null) {
+
+			ArrayList<String> keysWithPrefix = new ArrayList<String>();
+
+			for(String k: this.cache.keySet()) {
+				if(k.startsWith(prefix)) {
+					keysWithPrefix.add(k);
+				}
 			}
-		}
 
-		return toRet;
-	}
+			if(this.debug) {
+				System.out.println("[REPLDB] Recieved list of keys " + keysWithPrefix + " with prefix \"" + prefix + "\" from cache.");
+			}
 
-	// Delete Value(s)
+			return keysWithPrefix.toArray(new String[0]);
+			
+		} else {
+			
+			String reqURL = this.url + "?prefix=" + prefix;
+			HttpRequest request = HttpRequest.newBuilder().GET().uri(URI.create(reqURL)).build();
 
-	public void delete(String key) throws IOException, InterruptedException {
+			HttpResponse<String> response = null;
 
-		if(encoded) {
-			key = encode(key);
-		}
+			try {
+				response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+			} catch(Exception e) {
+				if(e.getMessage() != null && e.getMessage() != "") {
+					System.out.println("[REPLDB] " + e.getMessage());
+				}
+				e.printStackTrace();
+				System.err.println("[REPLDB] Failed to list keys");
+				return null;
+			}
 
-		HttpRequest request = HttpRequest.newBuilder()
-			.DELETE()
-			.uri(URI.create(this.url + "/" + key))
-			.build();
+			String[] tokens = new String[0];
+			if(encoded) {
+				tokens = decode(response.body()).split("\n");
+			} else {
+				tokens = response.body().split("\n");
+			}
 
-		httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+			if(this.debug) {
+				System.out.println("[REPLDB] Recieved list of keys " + tokens + " with prefix \"" + prefix + "\" from http request.");
+			}
 
-		cache.remove(key);
-
-	}
-
-	public void delete(String... keys) throws IOException, InterruptedException {
-
-		for(String key: keys) {
-			delete(key);  
-		}
-
-	}
-
-	public void empty() throws IOException, InterruptedException {
-
-		for(String key: getAll().keySet()) {
-			delete(key);
+			return tokens;
 		}
 
 	}
 
 	// Utilities
 
-	private static HttpRequest.BodyPublisher ofFormData(Map<Object, Object> data) {
-
-		StringBuilder builder = new StringBuilder();
-
-		for (Map.Entry<Object, Object> entry : data.entrySet()) {
-
-			if (builder.length() > 0) {
-				builder.append("&");
-			}
-
-			builder.append(URLEncoder.encode(entry.getKey().toString(), StandardCharsets.UTF_8));
-
-			builder.append("=");
-
-			builder.append(URLEncoder.encode(entry.getValue().toString(), StandardCharsets.UTF_8));
-
-		}
-
-		return HttpRequest.BodyPublishers.ofString(builder.toString());
+	private HttpRequest.BodyPublisher getPostData(String keyRaw, String valueRaw) { // Convert key/value pair to urlencoded String
+		return HttpRequest.BodyPublishers.ofString(
+			this.encode(keyRaw) +
+			"=" +
+			this.encode(valueRaw)
+		);
 	}
 
-	private static String encode(String encodeMe) {
+	private String encode(String toEncode) { // equivalent to js's encodeURIComponent
+		if (toEncode == null || toEncode == "") return "";
+		return URLEncoder.encode(toEncode, StandardCharsets.UTF_8);
+	}
 
-		if (encodeMe == null) {
+	private String decode(String toDecode) { // equivalent to js's decodeURIComponent
+		if (toDecode == null || toDecode == "")	return "";
+		try {
+			return URLDecoder.decode(toDecode, StandardCharsets.UTF_8.name());
+		} catch(UnsupportedEncodingException uee) {
+			if(uee.getMessage() != null && uee.getMessage() != "") {
+				System.out.println("[REPLDB] " + uee.getMessage());
+			}
+			uee.printStackTrace();
+			System.err.println("[REPLDB] Failed to decode \"" + toDecode + "\"");
 			return "";
 		}
-
-		try {
-
-			String encoded = URLEncoder.encode(encodeMe, StandardCharsets.UTF_8.name());
-
-			return encoded;
-
-		} catch (UnsupportedEncodingException ex) {
-			throw new RuntimeException(ex);
-		}
 	}
-
-	private String decode(String s) {
-		if (s == null) {
-			return "";
-		}
-
-		try {
-			
-			String decoded = URLDecoder.decode(s, StandardCharsets.UTF_8.name());
-			return decoded;
-
-		} catch (UnsupportedEncodingException ex) {
-			throw new RuntimeException(ex);
-		}
-	}
-
-	public void print() {
-
-		System.out.println("Printing");
-
-		if(this.cache != null) {
-
-			for (Map.Entry<String, String> entry : this.cache.entrySet()) {
-				System.out.println(decode(entry.getKey()) + ": " + decode(entry.getValue().toString()));
-			}
-
-		} else {
-			System.out.println("Map is currently set to null");
-		}
-
-	}
-	
-	// End Utilities
-
 }
