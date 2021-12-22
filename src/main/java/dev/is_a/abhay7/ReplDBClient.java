@@ -12,6 +12,8 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 
 */
 
+package dev.is_a.abhay7;
+
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 
@@ -30,53 +32,98 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 
+/**
+* The ReplDBClient class is a single class Java Client for the Database available in a replit.com repl. It offers simplistic usage and is also safe, making sure applications using this do not crash
+* 
+* @author  Abhay
+* @version 1.0-SNAPSHOT
+* @see     <a href="https://replit.com">https://replit.com</a>
+* @since   2021-10-09
+*/
 public class ReplDBClient {
 
 	// Variables
-
-	private String url;
-	private boolean encoded;
-	private boolean cached;
+	private final String url;
+	private final boolean encoded;
+	private final boolean cached;
 	private static Map<String, String> cache = null;
 	private boolean debug;
 	private final HttpClient httpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_2).build();
 
 	// Constructors
 
-	// TODO - Use boolean... bools with one constructor rather than making it redundant with a bunch
-
+	/**
+	* Class Constructor with default values passed
+	*/
 	public ReplDBClient() {
 		this(System.getenv("REPLIT_DB_URL"), true, true, false);
 	}
 
+	/**
+	* Class Constructor with database url provided
+	* @param url The URL of the database
+	*/
 	public ReplDBClient(String url) {
 		this(url, true, true, false);
 	}
 
-	public ReplDBClient(String url, boolean encoded) {
-		this(url, encoded, true, false);
+	/**
+	* Class Constructor with database url and option of cache provided
+	* @param url    The URL of the database
+	* @param cached Whether to cache the database in memory or not
+	*/
+	public ReplDBClient(String url, boolean cached) {
+		this(url, cached, true, false);
 	}
 
-	public ReplDBClient(String url, boolean encoded, boolean cached) {
-		this(url, encoded, cached, false);
+	/**
+	* Class Constructor with database url and option of cache provided
+	* @param url     The URL of the database
+	* @param cached  Whether to cache the database in memory or not
+	* @param encoded Whether to double encode pairs in the database or not
+	*/
+	public ReplDBClient(String url, boolean cached, boolean encoded) {
+		this(url, cached, encoded, false);
 	}
 
-	public ReplDBClient(boolean encoded) {
-		this(System.getenv("REPLIT_DB_URL"), encoded, true, false);
+	/**
+	* Class Constructor with database url and option of cache provided
+	* @param cached Whether to cache the database in memory or not
+	*/
+	public ReplDBClient(boolean cached) {
+		this(System.getenv("REPLIT_DB_URL"), cached, true, false);
 	}
 
-	public ReplDBClient(boolean encoded, boolean cached) {
-		this(System.getenv("REPLIT_DB_URL"), encoded, cached, false);
+	/**
+	* Class Constructor with database url and option of cache provided
+	* @param cached  Whether to cache the database in memory or not
+	* @param encoded Whether to double encode pairs in the database or not
+	*/
+	public ReplDBClient(boolean cached, boolean encoded) {
+		this(System.getenv("REPLIT_DB_URL"), cached, encoded, false);
 	}
 
-	public ReplDBClient(boolean encoded, boolean cached, boolean debug) {
-		this(System.getenv("REPLIT_DB_URL"), encoded, cached, debug);
+	/**
+	* Class Constructor with database url and option of cache provided
+	* @param cached  Whether to cache the database in memory or not
+	* @param encoded Whether to double encode pairs in the database or not
+	* @param debug   Whether to enable debug mode in the client
+	*/
+	public ReplDBClient(boolean cached, boolean encoded, boolean debug) {
+		this(System.getenv("REPLIT_DB_URL"), cached, encoded, debug);
 	}
 
-	public ReplDBClient(String url, boolean encoded, boolean cached, boolean debug) {
+	/**
+	* Class Constructor with database url and option of cache provided
+	* @param url     The URL of the database
+	* @param cached  Whether to cache the database in memory or not
+	* @param encoded Whether to double encode pairs in the database or not
+	* @param debug   Whether to enable debug mode in the client
+	*/
+	public ReplDBClient(String url, boolean cached, boolean encoded, boolean debug) {
 
-		this.encoded = encoded;
 		this.cached = cached;
+		this.encoded = encoded;
 		this.debug = debug;
 
 		try {
@@ -84,17 +131,17 @@ public class ReplDBClient {
 			URI uri = new URI(url);
 
 			if(!uri.getHost().equals("kv.replit.com")) {
-				throw new Exception("Invalid host \"" + uri.getHost() + "\"for provided database URL. Please provide one with the host \"kv.replit.com\"");
+				throw new IllegalArgumentException("Invalid host \"" + uri.getHost() + "\"for provided database URL. Please provide one with the host \"kv.replit.com\"");
 			}
 
 			if(!uri.getScheme().equals("https")) {
-				throw new Exception("Provided URL scheme is not https");
+				throw new IllegalArgumentException("Provided URL scheme is not https");
 			}
 
 		} catch(Exception e) {
 			if (e.getMessage() != null) System.out.println("[REPLDB] " + e.getMessage());
 			System.err.println("Invalid URL provided for ReplDBClient");
-			System.exit(1);
+			throw new IllegalArgumentException("Invalid URL provided for ReplDBClient");
 		}
 
 		this.url = url;
@@ -117,15 +164,26 @@ public class ReplDBClient {
 
 	// Get value by key
 
+	/**
+	* Gets the value associated with a key from the database or cache
+	* @param keyRaw The raw key which to get the value from
+	* @returns The value in the database associated with the passed in key
+	*/
 	public String get(String keyRaw) {
 		return this.get(keyRaw, this.cached);
 	}
 
+	/**
+	* Gets the value associated with a key from the database or cache
+	* @param keyRaw The raw key which to get the value from
+	* @param cached Whether to get the item from cache or through the network. If cache has been disabled,
+	* @returns The value in the database associated with the passed in key
+	*/
 	public String get(String key, boolean cached) {
 
 		key = this.encoded ? encode(key) : key; // Encode key if encoded
 
-		if(cached && ReplDBClient.cache.containsKey(key)) {
+		if(this.cached && cached && ReplDBClient.cache.containsKey(key)) {
 			// Check if cached, if so, return the value at cache
 			String valueRaw = ReplDBClient.cache.get(key);
 			String value = this.encoded ? decode(valueRaw) : valueRaw;
@@ -160,15 +218,27 @@ public class ReplDBClient {
 			String value = this.encoded ? decode(response.body()) : response.body();
 			return value;
 		}
-
 		System.out.println("[REPLDB] Failed to get. Returning null");
 		return null;
 	}
 
+	/**
+	* Gets the values associated with a keys from the database or cache
+	* @param keys They raw keys to get the value from
+	* @returns The values in the database associated with the passed in keys
+	* @see #get(String, boolean) get
+	*/
 	public String[] get(String... keys) {
 		return this.get(this.cached, keys);
 	}
 
+	/**
+	* Gets the values associated with a keys from the database or cache
+	* @param cached Whether to get the keys from the cache or network
+	* @param keys They raw keys to get the value from
+	* @returns The values in the database associated with the passed in keys
+	* @see #get(String, boolean) get
+	*/
 	public String[] get(boolean cached, String... keys) {
 		String[] toRet = new String[keys.length];
 
@@ -181,6 +251,12 @@ public class ReplDBClient {
 
 	// Set key to value
 
+	/**
+	* Sets a key to a value in the database
+	* @param key   The key for the pair
+	* @param value They value for the pair
+	* @returns Whether setting the pair was a success
+	*/
 	public boolean set(String key, String value) {
 
 		if(this.encoded) {
@@ -213,14 +289,27 @@ public class ReplDBClient {
 
 	}
 
-	public boolean[] set(String[] keys, String[] pairs) {
-		boolean[] toRet = new boolean[Math.min(keys.length, pairs.length)];
+	/**
+	* Sets keys to values in the database
+	* @param keys  The keys for the pairs
+	* @param value They value for the pair
+	* @returns A boolean array highlighting whether each pair was succesfully added
+	* @see #set(String, String) set
+	*/
+	public boolean[] set(String[] keys, String[] values) {
+		boolean[] toRet = new boolean[Math.min(keys.length, values.length)];
 		for(int i = 0; i < toRet.length; i++) {
-			toRet[i] = this.set(keys[i], pairs[i]);
+			toRet[i] = this.set(keys[i], values[i]);
 		}
 		return toRet;
 	}
 
+	/**
+	* Sets keys to values in the database
+	* @param pairs The key/value pairs to set in the database
+	* @returns A boolean array highlighting whether each pair was succesfully added
+	* @see #set(String, String) set
+	*/
 	public boolean[] set(Map<String, String> pairs) {
 		boolean[] toRet = new boolean[pairs.size()];
 		int nextIndex = 0;
@@ -233,6 +322,11 @@ public class ReplDBClient {
 
 	// Delete key/value pair
 
+	/**
+	* Deletes a pair with the associated key in the database
+	* @param key The key of the pair to delete
+	* @returns Whether the pair was succesfully deleted in the database
+	*/
 	public boolean delete(String key) {
 
 		key = this.encoded ? encode(key) : key;
@@ -262,6 +356,12 @@ public class ReplDBClient {
 
 	}
 
+	/**
+	* Deletes the pair with the associated keys in the database
+	* @param keys The keys of the pairs to delete
+	* @returns Which pairs were succesfully deleted in the database
+	* @see #delete(String) delete
+	*/
 	public boolean[] delete(String... keys) {
 		boolean[] bools = new boolean[keys.length];
 		for(int i = 0; i < keys.length; i++) {
@@ -270,24 +370,51 @@ public class ReplDBClient {
 		return bools;
 	}
 
+	/**
+	* Empties the database (Deletes all keys)
+	* @returns Which keys were succesfully deleted
+	* @see #delete(String) delete
+	*/
 	public boolean[] empty() {
 		return this.delete(this.list());
 	}
 
 	// List keys
 
+	/**
+	* Lists the keys in the database
+	* @returns The keys
+	* @see #list(String, boolean) list
+	*/
 	public String[] list()  {
 		return this.list("");
 	}
 
+	/**
+	* Lists the keys in the database
+	* @param prefix The prefix of the keys to list
+	* @returns The keys
+	* @see #list(String, boolean) list
+	*/
 	public String[] list(String prefix) {
 		return this.list(prefix, this.cached);
 	}
 
+	/**
+	* Lists the keys in the database
+	* @param cached Whether to get the keys from the cache
+	* @see #list(String, boolean) list
+	*/
 	public String[] list(boolean cached) {
 		return this.list("", cached);
 	}
 
+	/**
+	* Lists the keys in the database
+	* @param prefix The prefix of the keys to list
+	* @param cached Whether to get the keys from the cache
+	* @returns The keys
+	*/
 	public String[] list(String prefix, boolean cached)  {
 
 		prefix = this.encoded ? this.encode(prefix) : prefix;
@@ -371,4 +498,45 @@ public class ReplDBClient {
 			return "";
 		}
 	}
+
+	/**
+	* Returns the database url
+	* @returns The url
+	*/
+	public String getURL() {
+		return this.url;
+	}
+
+	/**
+	* Returns whether the database is cached
+	* @returns Whether it is cached
+	*/
+	public boolean isCached() {
+		return this.cached;
+	}
+
+	/**
+	* Returns whether the database is encoded
+	* @returns Whether it is encoded
+	*/
+	public boolean isEncoded() {
+		return this.encoded;
+	}
+
+	/**
+	* Returns whether the client is in debug mode
+	* @returns Whether it is in debug mode
+	*/
+	public boolean isDebug() {
+		return this.debug;
+	}
+
+	/**
+	* Sets whether the client is in debug mode
+	* @param Set it in debug mode or not
+	*/
+	public void setDebug(boolean debug) {
+		this.debug = debug;
+	}
+
 }
